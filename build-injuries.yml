@@ -1,0 +1,47 @@
+# Save this in your repo at:  .github/workflows/build-injuries.yml
+#
+# Rebuilds injuries.json from the Google Sheet every morning, and any time
+# you press "Run workflow" in the Actions tab.
+
+name: Build injuries.json
+
+on:
+  schedule:
+    # 09:00 UTC = 4:00am Central. Change the hour if you like.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the CSV reader
+        run: npm install --no-save papaparse@5
+
+      - name: Build injuries.json
+        run: node build-injuries.mjs
+
+      - name: Save it if anything changed
+        run: |
+          if [[ -n "$(git status --porcelain injuries.json)" ]]; then
+            git config user.name "recovr-bot"
+            git config user.email "actions@github.com"
+            git add injuries.json
+            git commit -m "Update injury data"
+            git push
+            echo "Published updated injury data."
+          else
+            echo "Nothing changed today."
+          fi
