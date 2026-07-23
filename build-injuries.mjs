@@ -108,9 +108,9 @@ async function fetchCsv(tab, attempt = 1) {
 }
 
 /**
- * Find the row that holds the column headers. Usually row 1, but a banner
- * or instructions row above it is common, so scan the first several rows
- * for one containing both Name and Slug.
+ * Find the row holding the column headers. Usually row 1, but a banner or
+ * instructions row above it is common, so scan the first several rows for
+ * one containing both Name and Slug.
  */
 function findHeaderRow(rows) {
     const limit = Math.min(rows.length, 10)
@@ -121,47 +121,76 @@ function findHeaderRow(rows) {
     return -1
 }
 
-/**
- * Does this text read as written-out prose rather than a list?
- * Two signals: it contains sentence-ending punctuation followed by a new
- * sentence, or it's simply long enough that commas are almost certainly
- * grammar rather than separators.
- */
-function looksLikeProse(text) {
-    if (/[.!?]["”]?\s+["“A-Z]/.test(text)) return true
-    if (text.length > 220) return true
-    return false
+/** Split on commas, but never inside parentheses. */
+function splitOutsideParens(text) {
+    const out = []
+    let depth = 0
+    let current = ""
+
+    for (const char of text) {
+        if (char === "(") depth++
+        else if (char === ")") depth = Math.max(0, depth - 1)
+
+        if (char === "," && depth === 0) {
+            out.push(current)
+            current = ""
+        } else {
+            current += char
+        }
+    }
+    out.push(current)
+
+    return out.map((s) => s.trim()).filter(Boolean)
+}
+
+/** Strip a leading bullet or "1." style marker. */
+function stripBullet(text) {
+    return text.replace(/^\s*(?:[•\-–—*]|\d+[.)])\s+/, "").trim()
 }
 
 /**
- * Turn a cell into a clean list.
- *   - Line breaks always win: one item per line.
- *   - A single line of short comma-separated phrases becomes a list.
- *   - A single line of prose stays as one item.
+ * Decide how to break a single line of text into list items.
+ *
+ * Volunteers write these cells three different ways, so this reads the
+ * punctuation to work out which one they used:
+ *
+ *   1. Capitalized items ("Bruising, Redness, Swelling") — split at the
+ *      commas that come before a capital letter, so commas *inside* an
+ *      item survive intact.
+ *   2. Full paragraphs — leave alone. Marked by real sentence breaks or by
+ *      long stretches between commas.
+ *   3. Lowercase items ("nosebleed, pain when touching nose") — split at
+ *      every comma outside parentheses.
  */
+function splitSingleLine(text) {
+    const byCapital = text
+        .split(/,\s*(?=[A-Z])/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    if (byCapital.length > 1) return byCapital
+
+    const pieces = splitOutsideParens(text)
+    const hasSentenceBreak = /[.!?]["”]?\s+["“A-Z]/.test(text)
+    const averagePiece = text.length / pieces.length
+
+    if (hasSentenceBreak || averagePiece >= 30) return [text]
+
+    return pieces
+}
+
+/** Turn a cell into a clean list. Line breaks always win. */
 function splitList(raw) {
     if (!raw) return []
 
     const lines = String(raw)
         .split(/\r?\n/)
-        .map((s) => s.replace(/^\s*(?:[•\-–—*]|\d+[.)])\s+/, "").trim())
+        .map(stripBullet)
         .filter(Boolean)
 
     if (lines.length > 1) return lines
+    if (lines.length === 0) return []
 
-    const single = lines[0] || ""
-    if (!single) return []
-
-    if (looksLikeProse(single)) return [single]
-
-    if ((single.match(/,/g) || []).length >= 2) {
-        return single
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-    }
-
-    return [single]
+    return splitSingleLine(lines[0])
 }
 
 function finishRow(row) {
@@ -178,7 +207,7 @@ function finishRow(row) {
                 .filter((s) => /^https?:\/\//i.test(s))
                 .map((s) => s.replace(/[.,)]+$/, ""))
         else if (key === "priority") out[key] = Number.parseInt(raw, 10) || 0
-        else out[key] = raw
+        else out[key] = raw.replace(/\s+/g, " ").trim()
     }
 
     if (out.slug) {
@@ -233,9 +262,7 @@ async function main() {
                     `    row ${i + 1}: ${JSON.stringify(r).slice(0, 400)}`
                 )
             })
-            problems.push(
-                `Tab "${tab}": no row contains both "Name" and "Slug".`
-            )
+            problems.push(`Tab "${tab}": no row contains both "Name" and "Slug".`)
             continue
         }
 
@@ -284,7 +311,7 @@ async function main() {
         injuries.push(...rows)
     }
 
-    // Duplicate slugs are reported but every injury is still kept.
+    // Duplicate slugs are reported, but every injury is still kept.
     const seen = new Map()
     for (const injury of injuries) {
         if (seen.has(injury.slug)) {
@@ -293,6 +320,16 @@ async function main() {
             )
         } else {
             seen.set(injury.slug, injury.region)
+        }
+    }
+
+    // Empty required fields are worth knowing about
+    for (const injury of injuries) {
+        const blanks = ["overview", "symptoms", "whatToDo", "redFlags"].filter(
+            (f) => !injury[f] || injury[f].length === 0
+        )
+        if (blanks.length) {
+            problems.push(`${injury.name}: empty ${blanks.join(", ")}`)
         }
     }
 
