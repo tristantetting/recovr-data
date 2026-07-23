@@ -16,22 +16,12 @@ import Papa from "papaparse"
 /* ------------------------------------------------------------------ */
 
 // The long chunk from your sheet's URL, between /d/ and /edit
-const SHEET_ID = process.env.RECOVR_SHEET_ID || "PASTE_YOUR_SHEET_ID_HERE"
+const SHEET_ID = process.env.RECOVR_SHEET_ID || "1XLsGIdBjMWiJ_ljBHumEBEWQdHmVBaBE8vVfn8oyoK4"
 
 // The name of every tab you want included — exact spelling and capitalization.
 // Add a line whenever your team adds a region.
 const TABS = [
-    "Head",
-    "Shoulder",
-    "Chest",
-    "UpperBack",
-    "LowerBack-Glutes",
-    "Wrist-Hand",
-    "Groin",
-    "Hip",
-    "Knee",
-    "LowerLeg",
-    "Foot-Ankle",
+    "ALL INJURIES",
 ]
 
 /* ------------------------------------------------------------------ */
@@ -40,34 +30,34 @@ const TABS = [
 /* ------------------------------------------------------------------ */
 
 const COLUMNS = {
-    Name: "name",
-    Slug: "slug",
-    Region: "region",
-    Format: "overviewHeading",
-    Overview: "overview",
-    "Symptoms List": "symptoms",
-    "Format 2": "feelsLikeHeading",
-    "What It May Feel Like": "feelsLike",
-    "Format 3": "causesHeading",
-    "Common Causes": "causes",
-    "Self Check": "selfCheck",
-    "What To Do": "whatToDo",
-    "Red Flags": "redFlags",
-    "Recovery Tips": "recoveryTips",
-    Tags: "tags",
-    Priority: "priority",
-    Links: "links",
+    Name: "Name",
+    Slug: "Slug",
+    Region: "Region",
+    Format: "Format",
+    Overview: "Overview",
+    "Symptoms List": "Symptoms List",
+    "Format 2": "Format 2",
+    "What It May Feel Like": "What It May Feel Like",
+    "Format 3": "Format 3",
+    "Common Causes": "Common Causes",
+    "Self Check": "Self Check",
+    "What To Do": "What To Do",
+    "Red Flags": "Red Flags",
+    "Recovery Tips": "Recovery Tips",
+    Tags: "Tags",
+    Priority: "Priority",
+    Links: "Links",
 }
 
 // Fields that should come out as a list instead of one long string
 const LIST_FIELDS = new Set([
-    "symptoms",
-    "feelsLike",
-    "causes",
-    "selfCheck",
-    "whatToDo",
-    "redFlags",
-    "recoveryTips",
+    "Symptoms List",
+    "What It May Feel Like",
+    "Common Causes",
+    "Self Check",
+    "What To Do",
+    "Red Flags",
+    "Recovery Tips",
 ])
 
 const OUT_FILE = "injuries.json"
