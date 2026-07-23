@@ -121,10 +121,27 @@ function findHeaderRow(rows) {
     return -1
 }
 
-// Turn a cell into a clean list. Prefers line breaks; falls back to commas
-// when the whole thing sits on one line.
+/**
+ * Does this text read as written-out prose rather than a list?
+ * Two signals: it contains sentence-ending punctuation followed by a new
+ * sentence, or it's simply long enough that commas are almost certainly
+ * grammar rather than separators.
+ */
+function looksLikeProse(text) {
+    if (/[.!?]["”]?\s+["“A-Z]/.test(text)) return true
+    if (text.length > 220) return true
+    return false
+}
+
+/**
+ * Turn a cell into a clean list.
+ *   - Line breaks always win: one item per line.
+ *   - A single line of short comma-separated phrases becomes a list.
+ *   - A single line of prose stays as one item.
+ */
 function splitList(raw) {
     if (!raw) return []
+
     const lines = String(raw)
         .split(/\r?\n/)
         .map((s) => s.replace(/^\s*(?:[•\-–—*]|\d+[.)])\s+/, "").trim())
@@ -133,13 +150,18 @@ function splitList(raw) {
     if (lines.length > 1) return lines
 
     const single = lines[0] || ""
+    if (!single) return []
+
+    if (looksLikeProse(single)) return [single]
+
     if ((single.match(/,/g) || []).length >= 2) {
         return single
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean)
     }
-    return single ? [single] : []
+
+    return [single]
 }
 
 function finishRow(row) {
@@ -151,7 +173,10 @@ function finishRow(row) {
         if (LIST_FIELDS.has(key)) out[key] = splitList(raw)
         else if (key === "tags") out[key] = raw.split(/[\s,]+/).filter(Boolean)
         else if (key === "links")
-            out[key] = raw.split(/\s+/).filter((s) => /^https?:\/\//i.test(s))
+            out[key] = raw
+                .split(/[\s,]+/)
+                .filter((s) => /^https?:\/\//i.test(s))
+                .map((s) => s.replace(/[.,)]+$/, ""))
         else if (key === "priority") out[key] = Number.parseInt(raw, 10) || 0
         else out[key] = raw
     }
@@ -259,15 +284,15 @@ async function main() {
         injuries.push(...rows)
     }
 
-    // Duplicate slugs break detail page routing
+    // Duplicate slugs are reported but every injury is still kept.
     const seen = new Map()
     for (const injury of injuries) {
         if (seen.has(injury.slug)) {
             problems.push(
-                `Duplicate slug "${injury.slug}" (${seen.get(injury.slug)} and ${injury.name})`
+                `Duplicate slug "${injury.slug}" — ${seen.get(injury.slug)} and ${injury.region}`
             )
         } else {
-            seen.set(injury.slug, injury.name)
+            seen.set(injury.slug, injury.region)
         }
     }
 
