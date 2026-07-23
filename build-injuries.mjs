@@ -1,8 +1,8 @@
 /**
  * Recovr — Google Sheet ➜ injuries.json
  *
- * Reads every region tab from the injury bank spreadsheet, cleans the rows,
- * and writes a single injuries.json file that the website loads from a CDN.
+ * Reads the injury bank tab(s), cleans the rows, and writes injuries.json
+ * for the website to load from a CDN.
  *
  * Run it yourself with:  node build-injuries.mjs
  */
@@ -15,49 +15,46 @@ import Papa from "papaparse"
 /* EDIT THESE TWO THINGS                                               */
 /* ------------------------------------------------------------------ */
 
-// The long chunk from your sheet's URL, between /d/ and /edit
-const SHEET_ID = process.env.RECOVR_SHEET_ID || "1XLsGIdBjMWiJ_ljBHumEBEWQdHmVBaBE8vVfn8oyoK4"
+const SHEET_ID =
+    process.env.RECOVR_SHEET_ID ||
+    "1XLsGIdBjMWiJ_ljBHumEBEWQdHmVBaBE8vVfn8oyoK4"
 
-// The name of every tab you want included — exact spelling and capitalization.
-// Add a line whenever your team adds a region.
-const TABS = [
-    "ALL INJURIES",
-]
+const TABS = ["ALL INJURIES"]
 
 /* ------------------------------------------------------------------ */
 /* Column mapping — left side is the header in your sheet,             */
 /* right side is the name the website code uses.                       */
+/* Matching ignores capitalization and extra spaces.                   */
 /* ------------------------------------------------------------------ */
 
 const COLUMNS = {
-    Name: "Name",
-    Slug: "Slug",
-    Region: "Region",
-    Format: "Format",
-    Overview: "Overview",
-    "Symptoms List": "Symptoms List",
-    "Format 2": "Format 2",
-    "What It May Feel Like": "What It May Feel Like",
-    "Format 3": "Format 3",
-    "Common Causes": "Common Causes",
-    "Self Check": "Self Check",
-    "What To Do": "What To Do",
-    "Red Flags": "Red Flags",
-    "Recovery Tips": "Recovery Tips",
-    Tags: "Tags",
-    Priority: "Priority",
-    Links: "Links",
+    Name: "name",
+    Slug: "slug",
+    Region: "region",
+    Format: "overviewHeading",
+    Overview: "overview",
+    "Symptoms List": "symptoms",
+    "Format 2": "feelsLikeHeading",
+    "What It May Feel Like": "feelsLike",
+    "Format 3": "causesHeading",
+    "Common Causes": "causes",
+    "Self Check": "selfCheck",
+    "What To Do": "whatToDo",
+    "Red Flags": "redFlags",
+    "Recovery Tips": "recoveryTips",
+    Tags: "tags",
+    Priority: "priority",
+    Links: "links",
 }
 
-// Fields that should come out as a list instead of one long string
 const LIST_FIELDS = new Set([
-    "Symptoms List",
-    "What It May Feel Like",
-    "Common Causes",
-    "Self Check",
-    "What To Do",
-    "Red Flags",
-    "Recovery Tips",
+    "symptoms",
+    "feelsLike",
+    "causes",
+    "selfCheck",
+    "whatToDo",
+    "redFlags",
+    "recoveryTips",
 ])
 
 const OUT_FILE = "injuries.json"
@@ -66,9 +63,24 @@ const OUT_FILE = "injuries.json"
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
+/** Strip invisible characters, collapse spaces, lowercase. */
+function normalize(value) {
+    return String(value ?? "")
+        .replace(/\uFEFF/g, "")
+        .replace(/\u00A0/g, " ")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+}
+
+// normalized sheet header -> website key
+const HEADER_LOOKUP = Object.fromEntries(
+    Object.entries(COLUMNS).map(([header, key]) => [normalize(header), key])
+)
+
 const csvUrl = (tab) =>
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq` +
-    `?tqx=out:csv&headers=1&sheet=${encodeURIComponent(tab)}`
+    `?tqx=out:csv&sheet=${encodeURIComponent(tab)}`
 
 async function fetchCsv(tab, attempt = 1) {
     const res = await fetch(csvUrl(tab))
@@ -77,13 +89,40 @@ async function fetchCsv(tab, attempt = 1) {
             await new Promise((r) => setTimeout(r, 1000 * attempt))
             return fetchCsv(tab, attempt + 1)
         }
-        throw new Error(`Tab "${tab}" returned HTTP ${res.status}`)
+        throw new Error(`HTTP ${res.status}`)
     }
-    return res.text()
+
+    const text = await res.text()
+
+    // If the sheet isn't link-shared, Google hands back a sign-in page
+    // with a normal 200 status. Catch that specifically.
+    if (/^\s*(<!doctype|<html)/i.test(text)) {
+        throw new Error(
+            "Google returned a sign-in page instead of data. " +
+                "Open the sheet, click Share, and set General access to " +
+                '"Anyone with the link" / Viewer.'
+        )
+    }
+
+    return text
+}
+
+/**
+ * Find the row that holds the column headers. Usually row 1, but a banner
+ * or instructions row above it is common, so scan the first several rows
+ * for one containing both Name and Slug.
+ */
+function findHeaderRow(rows) {
+    const limit = Math.min(rows.length, 10)
+    for (let i = 0; i < limit; i++) {
+        const cells = new Set((rows[i] || []).map(normalize))
+        if (cells.has("name") && cells.has("slug")) return i
+    }
+    return -1
 }
 
 // Turn a cell into a clean list. Prefers line breaks; falls back to commas
-// when the whole thing sits on one line (some rows are written that way).
+// when the whole thing sits on one line.
 function splitList(raw) {
     if (!raw) return []
     const lines = String(raw)
@@ -103,35 +142,20 @@ function splitList(raw) {
     return single ? [single] : []
 }
 
-function splitTags(raw) {
-    if (!raw) return []
-    return String(raw)
-        .split(/[\s,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-}
-
-function splitLinks(raw) {
-    if (!raw) return []
-    return String(raw)
-        .split(/\s+/)
-        .filter((s) => /^https?:\/\//i.test(s))
-}
-
-function cleanRow(row) {
+function finishRow(row) {
     const out = {}
 
-    for (const [header, key] of Object.entries(COLUMNS)) {
-        const raw = (row[header] ?? "").toString().trim()
+    for (const key of Object.values(COLUMNS)) {
+        const raw = (row[key] ?? "").toString().trim()
 
         if (LIST_FIELDS.has(key)) out[key] = splitList(raw)
-        else if (key === "tags") out[key] = splitTags(raw)
-        else if (key === "links") out[key] = splitLinks(raw)
+        else if (key === "tags") out[key] = raw.split(/[\s,]+/).filter(Boolean)
+        else if (key === "links")
+            out[key] = raw.split(/\s+/).filter((s) => /^https?:\/\//i.test(s))
         else if (key === "priority") out[key] = Number.parseInt(raw, 10) || 0
         else out[key] = raw
     }
 
-    // Slug has to be lowercase with no spaces — enforce it rather than trust it
     if (out.slug) {
         out.slug = out.slug
             .toLowerCase()
@@ -143,7 +167,7 @@ function cleanRow(row) {
 }
 
 // A row counts as a real injury only if it has both a name and a slug.
-// This skips the instructions block and the formatting example.
+// This skips instruction blocks and formatting examples.
 function isRealInjury(row) {
     return Boolean(row.name && row.slug && row.name.length < 120)
 }
@@ -153,43 +177,89 @@ function isRealInjury(row) {
 /* ------------------------------------------------------------------ */
 
 async function main() {
-    if (SHEET_ID === "PASTE_YOUR_SHEET_ID_HERE") {
-        throw new Error("Set SHEET_ID at the top of this file first.")
-    }
-
     const injuries = []
     const problems = []
 
     for (const tab of TABS) {
+        console.log(`\nReading tab "${tab}"`)
+
         let csv
         try {
             csv = await fetchCsv(tab)
         } catch (err) {
-            problems.push(`Could not read tab "${tab}": ${err.message}`)
+            problems.push(`Tab "${tab}": ${err.message}`)
+            console.log(`  ${err.message}`)
             continue
         }
 
-        const parsed = Papa.parse(csv, {
-            header: true,
+        const grid = Papa.parse(csv, {
+            header: false,
             skipEmptyLines: "greedy",
-        })
+        }).data
 
-        const rows = parsed.data.map(cleanRow).filter(isRealInjury)
+        console.log(`  ${grid.length} rows came back`)
 
-        // Fall back to the tab name if the Region cell was left blank
+        const headerIndex = findHeaderRow(grid)
+
+        if (headerIndex === -1) {
+            console.log("  Could not find a header row. Top rows look like:")
+            grid.slice(0, 3).forEach((r, i) => {
+                console.log(
+                    `    row ${i + 1}: ${JSON.stringify(r).slice(0, 400)}`
+                )
+            })
+            problems.push(
+                `Tab "${tab}": no row contains both "Name" and "Slug".`
+            )
+            continue
+        }
+
+        if (headerIndex > 0) {
+            console.log(
+                `  Headers found on row ${headerIndex + 1} (skipped ${headerIndex} row(s) above)`
+            )
+        }
+
+        const headerCells = grid[headerIndex].map(normalize)
+        const keys = headerCells.map((h) => HEADER_LOOKUP[h] || null)
+
+        const unmatched = headerCells.filter((h, i) => h && !keys[i])
+        if (unmatched.length) {
+            console.log(`  Columns being ignored: ${unmatched.join(", ")}`)
+        }
+
+        const missing = Object.values(COLUMNS).filter((k) => !keys.includes(k))
+        if (missing.length) {
+            console.log(`  Columns not found in the sheet: ${missing.join(", ")}`)
+        }
+
+        const rows = grid
+            .slice(headerIndex + 1)
+            .map((cells) => {
+                const obj = {}
+                keys.forEach((key, i) => {
+                    if (key) obj[key] = cells[i] ?? ""
+                })
+                return finishRow(obj)
+            })
+            .filter(isRealInjury)
+
         for (const row of rows) {
             if (!row.region) row.region = tab
         }
 
+        console.log(`  ${rows.length} injuries`)
+
         if (rows.length === 0) {
-            problems.push(`Tab "${tab}" produced 0 injuries — check the headers.`)
+            problems.push(
+                `Tab "${tab}": headers matched but no row had both a Name and a Slug.`
+            )
         }
 
-        console.log(`  ${tab.padEnd(18)} ${rows.length} injuries`)
         injuries.push(...rows)
     }
 
-    // Warn about duplicate slugs — these break detail page routing
+    // Duplicate slugs break detail page routing
     const seen = new Map()
     for (const injury of injuries) {
         if (seen.has(injury.slug)) {
@@ -210,8 +280,16 @@ async function main() {
 
     const regions = [...new Set(injuries.map((i) => i.region))].sort()
 
-    // Only rewrite the file when the content actually changed, so the daily
-    // run doesn't create a pointless commit every morning.
+    if (injuries.length === 0) {
+        if (problems.length) {
+            console.log("\nWorth a look:")
+            for (const p of problems) console.log("  • " + p)
+        }
+        throw new Error("No injuries found — nothing was written.")
+    }
+
+    // Only rewrite when the content actually changed, so the daily run
+    // doesn't create a pointless commit every morning.
     const fingerprint = crypto
         .createHash("sha1")
         .update(JSON.stringify(injuries))
@@ -227,28 +305,21 @@ async function main() {
     } else {
         await fs.writeFile(
             OUT_FILE,
-            JSON.stringify(
-                {
-                    generatedAt: new Date().toISOString(),
-                    fingerprint,
-                    count: injuries.length,
-                    regions,
-                    injuries,
-                },
-                null,
-                0
-            )
+            JSON.stringify({
+                generatedAt: new Date().toISOString(),
+                fingerprint,
+                count: injuries.length,
+                regions,
+                injuries,
+            })
         )
         console.log(`\nWrote ${OUT_FILE} — ${injuries.length} injuries.`)
+        console.log(`Regions: ${regions.join(", ")}`)
     }
 
     if (problems.length) {
         console.log("\nWorth a look:")
         for (const p of problems) console.log("  • " + p)
-    }
-
-    if (injuries.length === 0) {
-        throw new Error("No injuries found. Check SHEET_ID and the TABS list.")
     }
 }
 
