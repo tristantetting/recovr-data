@@ -1,6 +1,6 @@
 # Save this in your repo at:  .github/workflows/build-injuries.yml
 #
-# Rebuilds injuries.json from the Google Sheet:
+# Rebuilds injuries.json and questions.json from the Google Sheets:
 #   - every morning at 4am Central (the daily auto build)
 #   - any time you press "Run workflow" in the Actions tab (instant publish)
 #
