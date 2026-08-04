@@ -11,34 +11,27 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Get the repo
         uses: actions/checkout@v4
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install the CSV reader
         run: npm install --no-save papaparse@5
-
       - name: Build data files
         run: node build-injuries.mjs
-
-      - name: Keep the daily schedule awake
+      - name: Keep alive
         run: date -u +"%Y-%m-%dT%H:%M:%SZ" > .last-build
-
-      - name: Save any changes
+      - name: Commit everything the build produced
         run: |
           git config user.name "recovr-bot"
           git config user.email "actions@github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "Nothing changed today."
+            echo "Nothing changed."
           else
             git commit -m "Update data"
             git push
-            echo "Published."
           fi
