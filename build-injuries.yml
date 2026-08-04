@@ -1,17 +1,7 @@
-# Save this in your repo at:  .github/workflows/build-injuries.yml
-#
-# Rebuilds injuries.json and questions.json from the Google Sheets:
-#   - every morning at 4am Central (the daily auto build)
-#   - any time you press "Run workflow" in the Actions tab (instant publish)
-#
-# A keep-alive step bumps a timestamp file on every run so GitHub sees the
-# repo as active and does not pause the daily schedule.
-
 name: Build injuries.json
 
 on:
   schedule:
-    # 09:00 UTC = 4:00am Central
     - cron: "0 9 * * *"
   workflow_dispatch:
 
@@ -34,7 +24,7 @@ jobs:
       - name: Install the CSV reader
         run: npm install --no-save papaparse@5
 
-      - name: Build injuries.json
+      - name: Build data files
         run: node build-injuries.mjs
 
       - name: Keep the daily schedule awake
@@ -44,11 +34,11 @@ jobs:
         run: |
           git config user.name "recovr-bot"
           git config user.email "actions@github.com"
-          git add injuries.json questions.json .last-build
+          git add -A
           if git diff --cached --quiet; then
             echo "Nothing changed today."
           else
-            git commit -m "Update injury data"
+            git commit -m "Update data"
             git push
-            echo "Published updated injury data."
+            echo "Published."
           fi
