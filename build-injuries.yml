@@ -44,7 +44,7 @@ jobs:
         run: |
           git config user.name "recovr-bot"
           git config user.email "actions@github.com"
-          git add injuries.json .last-build
+          git add injuries.json questions.json .last-build
           if git diff --cached --quiet; then
             echo "Nothing changed today."
           else
